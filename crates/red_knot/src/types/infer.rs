@@ -36,7 +36,7 @@ pub fn infer_symbol_type(db: &dyn SemanticDb, symbol: GlobalSymbolId) -> QueryRe
 }
 
 #[tracing::instrument(level = "trace", skip(db))]
-pub fn infer_definition_type(
+pub(crate) fn infer_definition_type(
     db: &dyn SemanticDb,
     symbol: GlobalSymbolId,
     definition: Definition,

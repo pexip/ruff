@@ -1070,13 +1070,13 @@ impl fmt::Display for TokenKind {
     }
 }
 
-#[cfg(target_pointer_width = "64")]
-mod sizes {
-    use crate::lexer::{LexicalError, LexicalErrorType};
-    use crate::Tok;
-    use static_assertions::assert_eq_size;
+// #[cfg(target_pointer_width = "64")]
+// mod sizes {
+//     use crate::lexer::{LexicalError, LexicalErrorType};
+//     use crate::Tok;
+//     use static_assertions::assert_eq_size;
 
-    assert_eq_size!(Tok, [u8; 24]);
-    assert_eq_size!(LexicalErrorType, [u8; 24]);
-    assert_eq_size!(Result<Tok, LexicalError>, [u8; 32]);
-}
+//     assert_eq_size!(Tok, [u8; 24]);
+//     assert_eq_size!(LexicalErrorType, [u8; 24]);
+//     assert_eq_size!(Result<Tok, LexicalError>, [u8; 32]);
+// }

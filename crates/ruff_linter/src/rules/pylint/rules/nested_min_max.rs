@@ -160,7 +160,7 @@ pub(crate) fn nested_min_max(
                 func: Box::new(func.clone()),
                 arguments: Arguments {
                     args: collect_nested_args(min_max, args, checker.semantic()).into_boxed_slice(),
-                    keywords: Box::from(keywords),
+                    keywords: keywords.to_owned().into_boxed_slice(),
                     range: TextRange::default(),
                 },
                 range: TextRange::default(),

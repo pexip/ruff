@@ -95,7 +95,7 @@ impl<'s> Requester<'s> {
     /// Sends a request of kind `R` to the client, with associated parameters.
     /// The task provided by `response_handler` will be dispatched as soon as the response
     /// comes back from the client.
-    pub(crate) fn request<R>(
+    pub(in crate::server) fn request<R>(
         &mut self,
         params: R::Params,
         response_handler: impl Fn(R::Result) -> Task<'s> + 'static,
@@ -155,7 +155,10 @@ impl<'s> Requester<'s> {
         Ok(())
     }
 
-    pub(crate) fn pop_response_task(&mut self, response: lsp_server::Response) -> Task<'s> {
+    pub(in crate::server) fn pop_response_task(
+        &mut self,
+        response: lsp_server::Response,
+    ) -> Task<'s> {
         if let Some(handler) = self.response_handlers.remove(&response.id) {
             handler(response)
         } else {
