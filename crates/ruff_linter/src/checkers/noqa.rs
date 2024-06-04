@@ -253,6 +253,14 @@ pub(crate) fn check_noqa(
         ruff::rules::redirected_noqa(diagnostics, &noqa_directives);
     }
 
+    if settings.rules.enabled(Rule::NOQAByCode) {
+        ruff::rules::noqa_by_code(diagnostics, &noqa_directives);
+    }
+
+    if settings.rules.enabled(Rule::NOQAByName) {
+        ruff::rules::noqa_by_name(diagnostics, &noqa_directives);
+    }
+
     ignored_diagnostics.sort_unstable();
     ignored_diagnostics
 }
