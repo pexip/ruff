@@ -152,8 +152,9 @@ impl Display for RuleCodeAndBody<'_> {
                 if fix.applies(self.unsafe_fixes.required_applicability()) {
                     return write!(
                         f,
-                        "{code} {fix}{body}",
+                        "{code} ({rule_name}) {fix}{body}",
                         code = kind.rule().noqa_code().to_string().red().bold(),
+                        rule_name = kind.rule().as_ref().to_string().red().bold(),
                         fix = format_args!("[{}] ", "*".cyan()),
                         body = kind.body,
                     );
@@ -163,8 +164,9 @@ impl Display for RuleCodeAndBody<'_> {
 
         write!(
             f,
-            "{code} {body}",
+            "{code} ({rule_name}) {body}",
             code = kind.rule().noqa_code().to_string().red().bold(),
+            rule_name = kind.rule().as_ref().to_string().red().bold(),
             body = kind.body,
         )
     }
@@ -257,7 +259,11 @@ impl Display for MessageCodeFrame<'_> {
 
         let char_length = source.text[source.annotation_range].chars().count();
 
-        let label = kind.rule().noqa_code().to_string();
+        let label = format!(
+            "{code} ({rule_name})",
+            code = kind.rule().noqa_code().to_string(),
+            rule_name = kind.rule().as_ref(),
+        );
 
         let snippet = Snippet {
             title: None,
