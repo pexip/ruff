@@ -2,7 +2,7 @@ use ruff_diagnostics::{AlwaysFixableViolation, Diagnostic, Edit, Fix};
 use ruff_macros::{derive_message_formats, ViolationMetadata};
 use ruff_text_size::Ranged;
 
-use crate::noqa::{Codes, Directive, FileNoqaDirectives, NoqaDirectives};
+use crate::noqa::{Codes, Directive, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier};
 use crate::rule_redirects::get_redirect_target;
 
 /// ## What it does
@@ -70,10 +70,14 @@ pub(crate) fn redirected_file_noqa(
 /// Convert a sequence of [Codes] into [Diagnostic]s and append them to `diagnostics`.
 fn build_diagnostics(diagnostics: &mut Vec<Diagnostic>, codes: &Codes<'_>) {
     for code in codes.iter() {
-        if let Some(redirected) = get_redirect_target(code.as_str()) {
+        let NoqaIdentifier::Code(code_str) = code.identifier() else {
+            continue;
+        };
+
+        if let Some(redirected) = get_redirect_target(code_str) {
             let mut diagnostic = Diagnostic::new(
                 RedirectedNOQA {
-                    original: code.to_string(),
+                    original: code_str.to_owned(),
                     target: redirected.to_string(),
                 },
                 code.range(),

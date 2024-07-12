@@ -52,6 +52,35 @@ pub(crate) enum Directive<'a> {
     Codes(Codes<'a>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoqaIdentifier<'a> {
+    Code(&'a str),
+    Name(&'a str),
+}
+
+impl<'a> NoqaIdentifier<'a> {
+    pub(crate) fn as_str(&self) -> &'a str {
+        match self {
+            NoqaIdentifier::Code(code) => code,
+            NoqaIdentifier::Name(name) => name,
+        }
+    }
+
+    pub(crate) fn text_len(&self) -> TextSize {
+        match self {
+            NoqaIdentifier::Code(code) => code.text_len(),
+            NoqaIdentifier::Name(name) => name.text_len(),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            NoqaIdentifier::Code(code) => code.len(),
+            NoqaIdentifier::Name(name) => name.len(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct All {
     range: TextRange,
@@ -66,25 +95,32 @@ impl Ranged for All {
 
 /// An individual rule code in a `noqa` directive (e.g., `F401`).
 #[derive(Debug)]
-pub(crate) struct Code<'a> {
-    code: &'a str,
+pub(crate) struct RuleIdent<'a> {
+    identifier: NoqaIdentifier<'a>,
     range: TextRange,
 }
 
-impl<'a> Code<'a> {
-    /// The code that is ignored by the `noqa` directive.
+impl<'a> RuleIdent<'a> {
+    /// The identifier used for the rule that is ignored by the `noqa` directive.
     pub(crate) fn as_str(&self) -> &'a str {
-        self.code
+        match self.identifier {
+            NoqaIdentifier::Code(code) => code,
+            NoqaIdentifier::Name(name) => name,
+        }
+    }
+
+    pub(crate) fn identifier(&self) -> NoqaIdentifier<'a> {
+        self.identifier
     }
 }
 
-impl Display for Code<'_> {
+impl Display for RuleIdent<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.write_str(self.code)
+        fmt.write_str(self.as_str())
     }
 }
 
-impl Ranged for Code<'_> {
+impl<'a> Ranged for RuleIdent<'a> {
     /// The range of the rule code.
     fn range(&self) -> TextRange {
         self.range
@@ -94,21 +130,24 @@ impl Ranged for Code<'_> {
 #[derive(Debug)]
 pub(crate) struct Codes<'a> {
     range: TextRange,
-    codes: Vec<Code<'a>>,
+    codes: Vec<RuleIdent<'a>>,
 }
 
 impl Codes<'_> {
     /// Returns an iterator over the [`Code`]s in the `noqa` directive.
-    pub(crate) fn iter(&self) -> std::slice::Iter<Code> {
+    pub(crate) fn iter(&self) -> std::slice::Iter<RuleIdent> {
         self.codes.iter()
     }
 
     /// Returns `true` if the string list of `codes` includes `code` (or an alias
     /// thereof).
     pub(crate) fn includes(&self, needle: Rule) -> bool {
-        let needle = needle.noqa_code();
-        self.iter()
-            .any(|code| needle == get_redirect_target(code.as_str()).unwrap_or(code.as_str()))
+        let code_needle = needle.noqa_code();
+        let name_needle = needle.as_ref();
+        self.iter().any(|rule_ident| match rule_ident.identifier {
+            NoqaIdentifier::Code(code) => code_needle == get_redirect_target(code).unwrap_or(code),
+            NoqaIdentifier::Name(name) => name == name_needle,
+        })
     }
 }
 
@@ -257,22 +296,36 @@ impl<'a> FileNoqaDirectives<'a> {
                             vec![]
                         }
                         Directive::Codes(codes) => {
-                            codes.iter().filter_map(|code| {
-                                let code = code.as_str();
-                                // Ignore externally-defined rules.
-                                if external.iter().any(|external| code.starts_with(external)) {
-                                    return None;
-                                }
+                            codes.iter().filter_map(|rule_ident| {
+                                match rule_ident.identifier {
+                                    NoqaIdentifier::Code(code) => {
+                                        // Ignore externally-defined rules.
+                                        if external.iter().any(|external| code.starts_with(external)) {
+                                            return None;
+                                        }
 
-                                if let Ok(rule) = Rule::from_code(get_redirect_target(code).unwrap_or(code))
-                                {
-                                    Some(rule.noqa_code())
-                                } else {
-                                    #[expect(deprecated)]
-                                    let line = locator.compute_line_index(range.start());
-                                    let path_display = relativize_path(path);
-                                    warn!("Invalid rule code provided to `# ruff: noqa` at {path_display}:{line}: {code}");
-                                    None
+                                        if let Ok(rule) = Rule::from_code(get_redirect_target(code).unwrap_or(code))
+                                        {
+                                            Some(rule.noqa_code())
+                                        } else {
+                                            #[expect(deprecated)]
+                                            let line = locator.compute_line_index(range.start());
+                                            let path_display = relativize_path(path);
+                                            warn!("Invalid rule code provided to `# ruff: noqa` at {path_display}:{line}: {code}");
+                                            None
+                                        }
+                                    },
+                                    NoqaIdentifier::Name(name) => {
+                                        if let Ok(rule) = Rule::from_name(name) {
+                                            Some(rule.noqa_code())
+                                        } else {
+                                            #[expect(deprecated)]
+                                            let line = locator.compute_line_index(range.start());
+                                            let path_display = relativize_path(path);
+                                            warn!("Invalid rule name provided to `# ruff: noqa` at {path_display}:{line}: {name}");
+                                            None
+                                        }
+                                    }
                                 }
                             }).collect()
                         }
@@ -355,7 +408,8 @@ struct NoqaLexer<'a> {
     /// e.g. at `C` in `F401C402`.
     missing_delimiter: bool,
     /// Rule codes collected during lexing
-    codes: Vec<Code<'a>>,
+    codes: Vec<RuleIdent<'a>>,
+    space_contains_comma: bool,
 }
 
 impl<'a> NoqaLexer<'a> {
@@ -368,6 +422,7 @@ impl<'a> NoqaLexer<'a> {
             warnings: Vec::new(),
             missing_delimiter: false,
             codes: Vec::new(),
+            space_contains_comma: true,
         }
     }
 
@@ -529,6 +584,7 @@ impl<'a> NoqaLexer<'a> {
                 self.token_range().add(self.offset),
             ));
             self.cursor.eat_char(',');
+            self.space_contains_comma = true;
             return Ok(());
         }
 
@@ -558,6 +614,7 @@ impl<'a> NoqaLexer<'a> {
                 let code = &before_code[..self.cursor.token_len().to_usize()];
 
                 self.push_code(code);
+                self.space_contains_comma = false;
 
                 if self.cursor.is_eof() {
                     return Ok(());
@@ -566,6 +623,7 @@ impl<'a> NoqaLexer<'a> {
                 self.missing_delimiter = match self.cursor.first() {
                     ',' => {
                         self.cursor.eat_char(',');
+                        self.space_contains_comma = true;
                         false
                     }
 
@@ -591,6 +649,51 @@ impl<'a> NoqaLexer<'a> {
                     _ => return Err(LexicalError::InvalidCodeSuffix),
                 };
             }
+            Some(c) if c.is_ascii_lowercase() && self.space_contains_comma => {
+                self.cursor.eat_while(|chr| {
+                    (chr.is_ascii_lowercase() || chr.is_ascii_digit() || *chr == '-')
+                });
+                let name = &before_code[..self.cursor.token_len().to_usize()];
+                let next_char = self.cursor.chars().next();
+                if name.is_empty() || next_char.is_some_and(|c| !c.is_whitespace() && c != ',') {
+                    return Err(LexicalError::InvalidCodeSuffix);
+                }
+                self.push_name(name);
+                self.space_contains_comma = false;
+
+                if self.cursor.is_eof() {
+                    return Ok(());
+                }
+
+                self.missing_delimiter = match self.cursor.first() {
+                    ',' => {
+                        self.cursor.eat_char(',');
+                        self.space_contains_comma = true;
+                        false
+                    }
+                    // Whitespace is an allowed delimiter or the end of the `noqa`.
+                    c if c.is_whitespace() => false,
+                    // e.g. #noqa: F401F842
+                    //                ^
+                    // Push a warning and update the `missing_delimiter`
+                    // state but don't consume the character since it's
+                    // part of the next code.
+                    c if c.is_ascii_uppercase() => {
+                        self.warnings
+                            .push(LexicalWarning::MissingDelimiter(TextRange::empty(
+                                self.offset + self.position(),
+                            )));
+                        true
+                    }
+                    // Start of a new comment
+                    // e.g. #noqa: F401#A comment
+                    //                 ^
+                    '#' => false,
+                    _ => return Err(LexicalError::InvalidCodeSuffix),
+                };
+
+                self.eat_whitespace()
+            }
             Some(_) => {
                 // The first time we hit an evidently invalid code,
                 // it's probably a trailing comment. So stop lexing,
@@ -605,10 +708,18 @@ impl<'a> NoqaLexer<'a> {
         Ok(())
     }
 
-    /// Push current token to stack of [`Code`] objects
+    /// Push current token to stack of [`RuleIdent`] objects as a code
     fn push_code(&mut self, code: &'a str) {
-        self.codes.push(Code {
-            code,
+        self.codes.push(RuleIdent {
+            identifier: NoqaIdentifier::Code(code),
+            range: self.token_range().add(self.offset),
+        });
+    }
+
+    /// Push current token to stack of [`RuleIdent`] objects as a name
+    fn push_name(&mut self, name: &'a str) {
+        self.codes.push(RuleIdent {
+            identifier: NoqaIdentifier::Name(name),
             range: self.token_range().add(self.offset),
         });
     }
@@ -1414,6 +1525,12 @@ mod tests {
     }
 
     #[test]
+    fn noqa_name() {
+        let source = "# noqa: unused-import";
+        assert_debug_snapshot!(Directive::try_extract(source, TextSize::default()));
+    }
+
+    #[test]
     fn noqa_codes() {
         let source = "# noqa: F401, F841";
         let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
@@ -1442,6 +1559,18 @@ mod tests {
         )
         "#);
         assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_names() {
+        let source = "# noqa: unused-import, unused-variable";
+        assert_debug_snapshot!(Directive::try_extract(source, TextSize::default()));
+    }
+
+    #[test]
+    fn noqa_mixed() {
+        let source = "# noqa: F401, unused-variable";
+        assert_debug_snapshot!(Directive::try_extract(source, TextSize::default()));
     }
 
     #[test]
@@ -1949,158 +2078,8 @@ mod tests {
 
     #[test]
     fn noqa_invalid_codes() {
-        let source = "# noqa: unused-import, F401, some other code";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r"
-        Err(
-            MissingCodes,
-        )
-        ");
-        assert_lexed_ranges_match_slices(directive, source);
-    }
-
-    #[test]
-    fn noqa_squashed_codes() {
-        let source = "# noqa: F401F841";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r#"
-        Ok(
-            Some(
-                NoqaLexerOutput {
-                    warnings: [
-                        MissingDelimiter(
-                            12..12,
-                        ),
-                    ],
-                    directive: Codes(
-                        Codes {
-                            range: 0..16,
-                            codes: [
-                                Code {
-                                    code: "F401",
-                                    range: 8..12,
-                                },
-                                Code {
-                                    code: "F841",
-                                    range: 12..16,
-                                },
-                            ],
-                        },
-                    ),
-                },
-            ),
-        )
-        "#);
-        assert_lexed_ranges_match_slices(directive, source);
-    }
-
-    #[test]
-    fn noqa_empty_comma() {
-        let source = "# noqa: F401,,F841";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r#"
-        Ok(
-            Some(
-                NoqaLexerOutput {
-                    warnings: [
-                        MissingItem(
-                            13..13,
-                        ),
-                    ],
-                    directive: Codes(
-                        Codes {
-                            range: 0..18,
-                            codes: [
-                                Code {
-                                    code: "F401",
-                                    range: 8..12,
-                                },
-                                Code {
-                                    code: "F841",
-                                    range: 14..18,
-                                },
-                            ],
-                        },
-                    ),
-                },
-            ),
-        )
-        "#);
-        assert_lexed_ranges_match_slices(directive, source);
-    }
-
-    #[test]
-    fn noqa_empty_comma_space() {
-        let source = "# noqa: F401, ,F841";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r#"
-        Ok(
-            Some(
-                NoqaLexerOutput {
-                    warnings: [
-                        MissingItem(
-                            13..14,
-                        ),
-                    ],
-                    directive: Codes(
-                        Codes {
-                            range: 0..19,
-                            codes: [
-                                Code {
-                                    code: "F401",
-                                    range: 8..12,
-                                },
-                                Code {
-                                    code: "F841",
-                                    range: 15..19,
-                                },
-                            ],
-                        },
-                    ),
-                },
-            ),
-        )
-        "#);
-        assert_lexed_ranges_match_slices(directive, source);
-    }
-
-    #[test]
-    fn noqa_non_code() {
-        let source = "# noqa: F401 We're ignoring an import";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r#"
-        Ok(
-            Some(
-                NoqaLexerOutput {
-                    warnings: [],
-                    directive: Codes(
-                        Codes {
-                            range: 0..12,
-                            codes: [
-                                Code {
-                                    code: "F401",
-                                    range: 8..12,
-                                },
-                            ],
-                        },
-                    ),
-                },
-            ),
-        )
-        "#);
-        assert_lexed_ranges_match_slices(directive, source);
-    }
-
-    #[test]
-    fn noqa_code_invalid_code_suffix() {
-        let source = "# noqa: F401abc";
-        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
-        assert_debug_snapshot!(directive, @r"
-        Err(
-            InvalidCodeSuffix,
-        )
-        ");
-        assert_lexed_ranges_match_slices(directive, source);
+        let source = "# noqa: unused_import, F401, some other code";
+        assert_debug_snapshot!(Directive::try_extract(source, TextSize::default()));
     }
 
     #[test]
@@ -2773,6 +2752,12 @@ mod tests {
         )
         "#);
         assert_lexed_ranges_match_slices(exemption, source);
+    }
+
+    #[test]
+    fn ruff_exemption_names() {
+        let source = "# ruff: noqa: unused-import, unused-variable";
+        assert_debug_snapshot!(ParsedFileExemption::try_extract(source));
     }
 
     #[test]
