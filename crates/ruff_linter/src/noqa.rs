@@ -64,23 +64,37 @@ impl Ranged for All {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoqaIdentifier<'a> {
+    Code(&'a str),
+    Name(&'a str),
+}
+
+
 /// An individual rule code in a `noqa` directive (e.g., `F401`).
 #[derive(Debug)]
 pub(crate) struct Code<'a> {
-    code: &'a str,
+    identifier: NoqaIdentifier<'a>,
     range: TextRange,
 }
 
 impl<'a> Code<'a> {
     /// The code that is ignored by the `noqa` directive.
     pub(crate) fn as_str(&self) -> &'a str {
-        self.code
+        match self.identifier {
+            NoqaIdentifier::Code(code) => code,
+            NoqaIdentifier::Name(name) => name,
+        }
+    }
+
+    pub(crate) fn identifier(&self) -> NoqaIdentifier<'a> {
+        self.identifier
     }
 }
 
 impl Display for Code<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.write_str(self.code)
+        fmt.write_str(self.as_str())
     }
 }
 
@@ -608,7 +622,7 @@ impl<'a> NoqaLexer<'a> {
     /// Push current token to stack of [`Code`] objects
     fn push_code(&mut self, code: &'a str) {
         self.codes.push(Code {
-            code,
+            identifier: NoqaIdentifier::Code(code),
             range: self.token_range().add(self.offset),
         });
     }
@@ -1239,7 +1253,7 @@ mod tests {
         })) = directive
         {
             for code in codes.iter() {
-                assert_eq!(&source[code.range], code.code);
+                assert_eq!(&source[code.range], code.as_str());
             }
         }
     }
