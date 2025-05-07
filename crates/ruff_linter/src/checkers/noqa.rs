@@ -10,7 +10,7 @@ use ruff_python_trivia::CommentRanges;
 use ruff_text_size::Ranged;
 
 use crate::fix::edits::delete_comment;
-use crate::noqa::{Code, Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier, NoqaMapping};
+use crate::noqa::{RuleIdent, Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier, NoqaMapping};
 use crate::preview::is_check_file_level_directives_enabled;
 use crate::registry::{AsRule, Rule, RuleSet};
 use crate::rule_redirects::get_redirect_target;

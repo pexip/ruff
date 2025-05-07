@@ -83,12 +83,12 @@ impl<'a> NoqaIdentifier<'a> {
 
 /// An individual rule code in a `noqa` directive (e.g., `F401`).
 #[derive(Debug)]
-pub(crate) struct Code<'a> {
+pub(crate) struct RuleIdent<'a> {
     identifier: NoqaIdentifier<'a>,
     range: TextRange,
 }
 
-impl<'a> Code<'a> {
+impl<'a> RuleIdent<'a> {
     /// The code that is ignored by the `noqa` directive.
     pub(crate) fn as_str(&self) -> &'a str {
         match self.identifier {
@@ -102,13 +102,13 @@ impl<'a> Code<'a> {
     }
 }
 
-impl Display for Code<'_> {
+impl Display for RuleIdent<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.write_str(self.as_str())
     }
 }
 
-impl Ranged for Code<'_> {
+impl Ranged for RuleIdent<'_> {
     /// The range of the rule code.
     fn range(&self) -> TextRange {
         self.range
@@ -118,12 +118,12 @@ impl Ranged for Code<'_> {
 #[derive(Debug)]
 pub(crate) struct Codes<'a> {
     range: TextRange,
-    codes: Vec<Code<'a>>,
+    codes: Vec<RuleIdent<'a>>,
 }
 
 impl Codes<'_> {
-    /// Returns an iterator over the [`Code`]s in the `noqa` directive.
-    pub(crate) fn iter(&self) -> std::slice::Iter<Code> {
+    /// Returns an iterator over the [`RuleIdent`]s in the `noqa` directive.
+    pub(crate) fn iter(&self) -> std::slice::Iter<RuleIdent> {
         self.codes.iter()
     }
 
@@ -350,7 +350,7 @@ fn lex_file_exemption(
     lexer.lex_file_exemption()
 }
 
-pub(crate) fn lex_codes(text: &str) -> Result<Vec<Code<'_>>, LexicalError> {
+pub(crate) fn lex_codes(text: &str) -> Result<Vec<RuleIdent<'_>>, LexicalError> {
     let mut lexer = NoqaLexer::in_range(TextRange::new(TextSize::new(0), text.text_len()), text);
     lexer.lex_codes()?;
     Ok(lexer.codes)
@@ -379,7 +379,7 @@ struct NoqaLexer<'a> {
     /// e.g. at `C` in `F401C402`.
     missing_delimiter: bool,
     /// Rule codes collected during lexing
-    codes: Vec<Code<'a>>,
+    codes: Vec<RuleIdent<'a>>,
 }
 
 impl<'a> NoqaLexer<'a> {
@@ -629,9 +629,9 @@ impl<'a> NoqaLexer<'a> {
         Ok(())
     }
 
-    /// Push current token to stack of [`Code`] objects
+    /// Push current token to stack of [`RuleIdent`] objects
     fn push_code(&mut self, code: &'a str) {
-        self.codes.push(Code {
+        self.codes.push(RuleIdent {
             identifier: NoqaIdentifier::Code(code),
             range: self.token_range().add(self.offset),
         });

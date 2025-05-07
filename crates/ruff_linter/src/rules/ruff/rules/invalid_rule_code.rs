@@ -1,4 +1,4 @@
-use crate::noqa::{Code, Directive};
+use crate::noqa::{RuleIdent, Directive};
 use crate::registry::Rule;
 use crate::Locator;
 use ruff_diagnostics::{AlwaysFixableViolation, Diagnostic, Edit, Fix};
@@ -78,20 +78,20 @@ pub(crate) fn invalid_noqa_code(
     }
 }
 
-fn code_is_valid(code: &Code, external: &[String]) -> bool {
+fn code_is_valid(code: &RuleIdent, external: &[String]) -> bool {
     let code_str = code.as_str();
     Rule::from_code(code_str).is_ok() || external.iter().any(|ext| code_str.starts_with(ext))
 }
 
 fn all_codes_invalid_diagnostic(
     directive: &Codes<'_>,
-    invalid_codes: Vec<&Code<'_>>,
+    invalid_codes: Vec<&RuleIdent<'_>>,
 ) -> Diagnostic {
     Diagnostic::new(
         InvalidRuleCode {
             rule_code: invalid_codes
                 .into_iter()
-                .map(Code::as_str)
+                .map(RuleIdent::as_str)
                 .collect::<Vec<_>>()
                 .join(", "),
         },
@@ -102,7 +102,7 @@ fn all_codes_invalid_diagnostic(
 
 fn some_codes_are_invalid_diagnostic(
     codes: &Codes,
-    invalid_code: &Code,
+    invalid_code: &RuleIdent,
     locator: &Locator,
 ) -> Diagnostic {
     let diagnostic = Diagnostic::new(
@@ -118,7 +118,7 @@ fn some_codes_are_invalid_diagnostic(
     )))
 }
 
-fn remove_invalid_noqa(codes: &Codes, invalid_code: &Code, locator: &Locator) -> Edit {
+fn remove_invalid_noqa(codes: &Codes, invalid_code: &RuleIdent, locator: &Locator) -> Edit {
     // Is this the first code after the `:` that needs to get deleted
     // For the first element, delete from after the `:` to the next comma (including)
     // For any other element, delete from the previous comma (including) to the next comma (excluding)
