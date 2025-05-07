@@ -70,6 +70,16 @@ pub(crate) enum NoqaIdentifier<'a> {
     Name(&'a str),
 }
 
+impl<'a> NoqaIdentifier<'a> {
+    pub(crate) fn as_str(&self) -> &'a str {
+        match self {
+            NoqaIdentifier::Code(code) => code,
+            NoqaIdentifier::Name(name) => name,
+        }
+    }
+}
+
+
 
 /// An individual rule code in a `noqa` directive (e.g., `F401`).
 #[derive(Debug)]

@@ -10,9 +10,7 @@ use ruff_python_trivia::CommentRanges;
 use ruff_text_size::Ranged;
 
 use crate::fix::edits::delete_comment;
-use crate::noqa::{
-    Code, Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaMapping,
-};
+use crate::noqa::{Code, Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier, NoqaMapping};
 use crate::preview::is_check_file_level_directives_enabled;
 use crate::registry::{AsRule, Rule, RuleSet};
 use crate::rule_redirects::get_redirect_target;
@@ -150,38 +148,63 @@ pub(crate) fn check_noqa(
                     let mut valid_codes = vec![];
                     let mut seen_codes = FxHashSet::default();
                     let mut self_ignore = false;
-                    for original_code in directive.iter().map(Code::as_str) {
-                        let code = get_redirect_target(original_code).unwrap_or(original_code);
-                        if Rule::UnusedNOQA.noqa_code() == code {
-                            self_ignore = true;
-                            break;
+                    for directive in directive.iter() {
+                        let mut identifier = directive.identifier();
+                        let original_identifier = identifier.as_str();
+
+                        match identifier {
+                            NoqaIdentifier::Code(original_code) => {
+                                let code = get_redirect_target(original_code).unwrap_or(original_code);
+
+                                if Rule::UnusedNOQA.noqa_code() == code {
+                                    self_ignore = true;
+                                    break;
+                                }
+                            }
+                            NoqaIdentifier::Name(name) => {
+                                if Rule::UnusedNOQA.as_ref() == name {
+                                    self_ignore = true;
+                                    break;
+                                }
+                            }
                         }
 
-                        if seen_codes.insert(original_code) {
-                            let is_code_used = if is_file_level {
-                                diagnostics
-                                    .iter()
-                                    .any(|diag| diag.kind.rule().noqa_code() == code)
-                            } else {
-                                matches.iter().any(|match_| *match_ == code)
-                            } || settings
+                        let rule_result = match identifier {
+                            NoqaIdentifier::Code(code) => Rule::from_code(code),
+                            NoqaIdentifier::Name(name) => Rule::from_name(name),
+                        };
+
+                        if !seen_codes.insert(original_identifier) {
+                            duplicated_codes.push(original_identifier);
+                            continue;
+                        }
+
+                        let Ok(rule) = rule_result else {
+                            if settings
                                 .external
                                 .iter()
-                                .any(|external| code.starts_with(external));
-
-                            if is_code_used {
-                                valid_codes.push(original_code);
-                            } else if let Ok(rule) = Rule::from_code(code) {
-                                if settings.rules.enabled(rule) {
-                                    unmatched_codes.push(original_code);
-                                } else {
-                                    disabled_codes.push(original_code);
-                                }
+                                .any(|external| original_identifier.starts_with(external)) {
+                                valid_codes.push(original_identifier);
                             } else {
-                                unknown_codes.push(original_code);
+                                unknown_codes.push(original_identifier);
                             }
+                            continue;
+                        };
+
+
+                        let is_code_used = if is_file_level {
+                            diagnostics
+                                .iter()
+                                .any(|diag| diag.kind.rule().noqa_code() == rule.noqa_code())
                         } else {
-                            duplicated_codes.push(original_code);
+                            matches.iter().any(|match_| *match_ == rule.noqa_code())
+                        };
+                        if is_code_used {
+                            valid_codes.push(original_identifier);
+                        } else if settings.rules.enabled(rule) {
+                            unmatched_codes.push(original_identifier);
+                        } else {
+                            disabled_codes.push(original_identifier);
                         }
                     }
 
@@ -208,7 +231,7 @@ pub(crate) fn check_noqa(
                                 "# noqa: "
                             };
                             Edit::range_replacement(
-                                format!("{}{}", prefix, valid_codes.join(", ")),
+                                format!("{}{}", prefix, valid_codes.iter().join(", ")),
                                 directive.range(),
                             )
                         };
