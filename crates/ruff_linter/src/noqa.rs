@@ -352,7 +352,7 @@ fn lex_file_exemption(
 
 pub(crate) fn lex_codes(text: &str) -> Result<Vec<RuleIdent<'_>>, LexicalError> {
     let mut lexer = NoqaLexer::in_range(TextRange::new(TextSize::new(0), text.text_len()), text);
-    lexer.lex_codes()?;
+    lexer.lex_codes_and_names()?;
     Ok(lexer.codes)
 }
 
@@ -499,13 +499,13 @@ impl<'a> NoqaLexer<'a> {
                 });
             }
             // Ex) # noqa: F401,F842
-            Some(':') => self.lex_codes()?,
+            Some(':') => self.lex_codes_and_names()?,
             // Ex) # noqa A comment
             // Ex) # noqa   : F401
             Some(c) if c.is_whitespace() => {
                 self.eat_whitespace();
                 match self.cursor.bump() {
-                    Some(':') => self.lex_codes()?,
+                    Some(':') => self.lex_codes_and_names()?,
                     _ => {
                         return Ok(NoqaLexerOutput {
                             warnings: self.warnings,
@@ -534,15 +534,15 @@ impl<'a> NoqaLexer<'a> {
         })
     }
 
-    fn lex_codes(&mut self) -> Result<(), LexicalError> {
+    fn lex_codes_and_names(&mut self) -> Result<(), LexicalError> {
         // SAFETY: Every call to `lex_code` advances the cursor at least once.
         while !self.cursor.is_eof() {
-            self.lex_code()?;
+            self.lex_code_or_name()?;
         }
         Ok(())
     }
 
-    fn lex_code(&mut self) -> Result<(), LexicalError> {
+    fn lex_code_or_name(&mut self) -> Result<(), LexicalError> {
         self.cursor.start_token();
         self.eat_whitespace();
 
@@ -615,14 +615,43 @@ impl<'a> NoqaLexer<'a> {
                     _ => return Err(LexicalError::InvalidCodeSuffix),
                 };
             }
-            Some(_) => {
+            Some(c) if c.is_ascii_lowercase() => {
+                // This should be a rule name
+                self.cursor.eat_while(|chr| chr.is_ascii_lowercase() || chr.is_ascii_digit() || chr == '-');
+
+                let name = &before_code[..self.cursor.token_len().to_usize()];
+                let next_char = self.cursor.chars().next();
+
+                // Ensure next char is whitespace or a comma
+                if !name.is_empty() && next_char.is_none_or(|chr| chr.is_whitespace() || chr == ',') {
+                    self.push_name(name);
+                } else {
+                    return Err(LexicalError::InvalidCodeSuffix)
+                }
+
+                if self.cursor.is_eof() {
+                    return Ok(());
+                }
+
+                self.missing_delimiter = false;
+                if self.cursor.first() == ',' {
+                    self.cursor.eat_char(',');
+                } else {
+                    // If there is no comma, the rest must be a comment
+                    self.cursor.skip_bytes(self.cursor.as_str().len());
+                }
+            }
+            Some('#') => {
                 // The first time we hit an evidently invalid code,
                 // it's probably a trailing comment. So stop lexing,
                 // but don't push an error.
                 // Ex)
-                // # noqa: F401 we import this for a reason
+                // # noqa: F401 # we import this for a reason
                 //              ^----- stop lexing but no error
                 self.cursor.skip_bytes(self.cursor.as_str().len());
+            }
+            Some(_) => {
+                return Err(LexicalError::InvalidCodeSuffix)
             }
             None => {}
         }
@@ -633,6 +662,14 @@ impl<'a> NoqaLexer<'a> {
     fn push_code(&mut self, code: &'a str) {
         self.codes.push(RuleIdent {
             identifier: NoqaIdentifier::Code(code),
+            range: self.token_range().add(self.offset),
+        });
+    }
+
+    /// Push current token to stack of [`RuleIdent`] objects
+    fn push_name(&mut self, name: &'a str) {
+        self.codes.push(RuleIdent {
+            identifier: NoqaIdentifier::Name(name),
             range: self.token_range().add(self.offset),
         });
     }
@@ -1423,9 +1460,69 @@ mod tests {
                         Codes {
                             range: 0..12,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 8..12,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_name() {
+        let source = "# noqa: unused-import";
+        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(directive, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..21,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-import",
+                                    ),
+                                    range: 8..21,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_name_comment() {
+        let source = "# noqa: unused-import comment";
+        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(directive, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..21,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-import",
+                                    ),
+                                    range: 8..21,
                                 },
                             ],
                         },
@@ -1450,13 +1547,122 @@ mod tests {
                         Codes {
                             range: 0..18,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 8..12,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 14..18,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_names() {
+        let source = "# noqa: unused-import, unused-variable";
+        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(directive, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..38,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-import",
+                                    ),
+                                    range: 8..21,
+                                },
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-variable",
+                                    ),
+                                    range: 23..38,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_names_comment() {
+        let source = "# noqa: unused-import, unused-variable comment";
+        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(directive, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..38,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-import",
+                                    ),
+                                    range: 8..21,
+                                },
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-variable",
+                                    ),
+                                    range: 23..38,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(directive, source);
+    }
+
+    #[test]
+    fn noqa_mixed() {
+        let source = "# noqa: F401, unused-variable";
+        let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(directive, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..29,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
+                                    range: 8..12,
+                                },
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-variable",
+                                    ),
+                                    range: 14..29,
                                 },
                             ],
                         },
@@ -1529,12 +1735,16 @@ mod tests {
                         Codes {
                             range: 0..18,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 8..12,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 14..18,
                                 },
                             ],
@@ -1662,12 +1872,16 @@ mod tests {
                         Codes {
                             range: 0..15,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 6..10,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 11..15,
                                 },
                             ],
@@ -1741,12 +1955,16 @@ mod tests {
                         Codes {
                             range: 0..20,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 9..13,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 16..20,
                                 },
                             ],
@@ -1874,12 +2092,16 @@ mod tests {
                         Codes {
                             range: 35..53,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 43..47,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 49..53,
                                 },
                             ],
@@ -1953,12 +2175,16 @@ mod tests {
                         Codes {
                             range: 0..18,
                             codes: [
-                                Code {
-                                    code: "F401",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F401",
+                                    ),
                                     range: 8..12,
                                 },
-                                Code {
-                                    code: "F841",
+                                RuleIdent {
+                                    identifier: Code(
+                                        "F841",
+                                    ),
                                     range: 14..18,
                                 },
                             ],
@@ -1973,7 +2199,7 @@ mod tests {
 
     #[test]
     fn noqa_invalid_codes() {
-        let source = "# noqa: unused-import, F401, some other code";
+        let source = "# noqa: unused_import, F401, some other code";
         let directive = lex_inline_noqa(TextRange::up_to(source.text_len()), source);
         assert_debug_snapshot!(directive, @r"
         Err(
@@ -2788,6 +3014,41 @@ mod tests {
                                 Code {
                                     code: "F401",
                                     range: 14..18,
+                                },
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+        "#);
+        assert_lexed_ranges_match_slices(exemption, source);
+    }
+
+    #[test]
+    fn ruff_exemption_names() {
+        let source = "# ruff: noqa: unused-import, unused-variable";
+        let exemption = lex_file_exemption(TextRange::up_to(source.text_len()), source);
+        assert_debug_snapshot!(exemption, @r#"
+        Ok(
+            Some(
+                NoqaLexerOutput {
+                    warnings: [],
+                    directive: Codes(
+                        Codes {
+                            range: 0..44,
+                            codes: [
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-import",
+                                    ),
+                                    range: 14..27,
+                                },
+                                RuleIdent {
+                                    identifier: Name(
+                                        "unused-variable",
+                                    ),
+                                    range: 29..44,
                                 },
                             ],
                         },

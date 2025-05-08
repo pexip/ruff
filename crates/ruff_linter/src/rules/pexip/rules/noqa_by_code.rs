@@ -25,7 +25,7 @@ use crate::{
 /// from typing import Never  # noqa: unused-import
 /// ```
 #[derive(ViolationMetadata)]
-pub struct NOQAByCode {
+pub(crate) struct NOQAByCode {
     pub codes_and_names: Vec<(String, String)>,
 }
 

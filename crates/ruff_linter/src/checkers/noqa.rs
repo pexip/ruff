@@ -10,11 +10,11 @@ use ruff_python_trivia::CommentRanges;
 use ruff_text_size::Ranged;
 
 use crate::fix::edits::delete_comment;
-use crate::noqa::{RuleIdent, Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier, NoqaMapping};
+use crate::noqa::{Directive, FileExemption, FileNoqaDirectives, NoqaDirectives, NoqaIdentifier, NoqaMapping};
 use crate::preview::is_check_file_level_directives_enabled;
 use crate::registry::{AsRule, Rule, RuleSet};
 use crate::rule_redirects::get_redirect_target;
-use crate::rules::pygrep_hooks;
+use crate::rules::{pexip, pygrep_hooks};
 use crate::rules::ruff;
 use crate::rules::ruff::rules::{UnusedCodes, UnusedNOQA};
 use crate::settings::LinterSettings;
@@ -155,6 +155,7 @@ pub(crate) fn check_noqa(
                         match identifier {
                             NoqaIdentifier::Code(original_code) => {
                                 let code = get_redirect_target(original_code).unwrap_or(original_code);
+                                identifier = NoqaIdentifier::Code(code);
 
                                 if Rule::UnusedNOQA.noqa_code() == code {
                                     self_ignore = true;
@@ -291,6 +292,14 @@ pub(crate) fn check_noqa(
         && !exemption.enumerates(Rule::InvalidRuleCode)
     {
         ruff::rules::invalid_noqa_code(diagnostics, &noqa_directives, locator, &settings.external);
+    }
+
+    if settings.rules.enabled(Rule::NOQAByCode) {
+        pexip::rules::noqa_by_code(diagnostics, &noqa_directives);
+    }
+
+    if settings.rules.enabled(Rule::NOQAByName) {
+        pexip::rules::noqa_by_name(diagnostics, &noqa_directives);
     }
 
     ignored_diagnostics.sort_unstable();
