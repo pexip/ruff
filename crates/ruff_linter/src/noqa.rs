@@ -296,14 +296,14 @@ impl<'a> FileNoqaDirectives<'a> {
                             vec![]
                         }
                         Directive::Codes(codes) => {
-                            codes.iter().filter_map(|code| {
-                                let code_str = code.as_str();
+                            codes.iter().filter_map(|rule_ident| {
+                                let code = rule_ident.as_str();
                                 // Ignore externally-defined rules.
-                                if matches!(code.identifier, NoqaIdentifier::Code(_)) && external.iter().any(|external| code_str.starts_with(external)) {
+                                if matches!(rule_ident.identifier, NoqaIdentifier::Code(_)) && external.iter().any(|external| code.starts_with(external)) {
                                     return None;
                                 }
 
-                                if let Ok(rule) = code.as_rule()
+                                if let Ok(rule) = rule_ident.as_rule()
                                 {
                                     Some(rule.noqa_code())
                                 } else {
@@ -1141,13 +1141,15 @@ impl<'a> NoqaDirectives<'a> {
                     }
                     if let Directive::Codes(codes) = &directive {
                         // Warn on invalid rule codes.
-                        for code in &codes.codes {
+                        for rule_ident in &codes.codes {
                             // Ignore externally-defined rules.
-                            if !external
+                            let code = rule_ident.as_str();
+                            if matches!(rule_ident.identifier, NoqaIdentifier::Code(_)) &&
+                                !external
                                 .iter()
-                                .any(|external| code.as_str().starts_with(external))
+                                .any(|external| code.starts_with(external))
                             {
-                                if code.as_rule().is_err()
+                                if rule_ident.as_rule().is_err()
                                 {
                                     #[allow(deprecated)]
                                     let line = locator.compute_line_index(range.start());

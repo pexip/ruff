@@ -149,25 +149,13 @@ pub(crate) fn check_noqa(
                     let mut seen_codes = FxHashSet::default();
                     let mut self_ignore = false;
                     for directive in directive.iter() {
-                        let mut identifier = directive.identifier();
+                        let identifier = directive.identifier();
                         let original_identifier = identifier.as_str();
+                        let rule_result = identifier.as_rule();
 
-                        match identifier {
-                            NoqaIdentifier::Code(original_code) => {
-                                let code = get_redirect_target(original_code).unwrap_or(original_code);
-                                identifier = NoqaIdentifier::Code(code);
-
-                                if Rule::UnusedNOQA.noqa_code() == code {
-                                    self_ignore = true;
-                                    break;
-                                }
-                            }
-                            NoqaIdentifier::Name(name) => {
-                                if Rule::UnusedNOQA.as_ref() == name {
-                                    self_ignore = true;
-                                    break;
-                                }
-                            }
+                        if matches!(rule_result, Ok(Rule::UnusedNOQA)) {
+                            self_ignore = true;
+                            break;
                         }
 
                         if !seen_codes.insert(original_identifier) {
