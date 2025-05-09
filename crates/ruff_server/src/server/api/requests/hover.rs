@@ -65,7 +65,7 @@ pub(crate) fn hover(
     })?;
 
     // Get rule for the code under the cursor.
-    let rule = Rule::from_code(word.as_str());
+    let rule = Rule::from_code(word.as_str()).map_err(|_| Rule::from_name(word.as_str()));
     let output = if let Ok(rule) = rule {
         format_rule_text(rule)
     } else {

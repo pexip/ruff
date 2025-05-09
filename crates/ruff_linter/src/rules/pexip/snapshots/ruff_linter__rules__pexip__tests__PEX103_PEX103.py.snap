@@ -25,7 +25,7 @@ PEX103.py:23:12: PEX103 [*] Noqa directive lists rule names instead of rule code
 21 | def f():
 22 |     # `ambiguous-variable-name` should be converted to `E741`.
 23 |     I = 1  # noqa: ambiguous-variable-name F841  comment
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ PEX103
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ PEX103
    |
    = help: Use rule codes in noqa directive
 
@@ -34,7 +34,7 @@ PEX103.py:23:12: PEX103 [*] Noqa directive lists rule names instead of rule code
 21 21 | def f():
 22 22 |     # `ambiguous-variable-name` should be converted to `E741`.
 23    |-    I = 1  # noqa: ambiguous-variable-name F841  comment
-   23 |+    I = 1  # noqa: E741 F841  comment
+   23 |+    I = 1  # noqa: E741, F841  comment
 24 24 | 
 25 25 | 
 26 26 | def f():

@@ -415,7 +415,7 @@ pub mod clap_completion {
                 .to_str()
                 .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-            Rule::from_code(value).map_err(|_| {
+            Rule::from_code(value).map_err(|_| Rule::from_name(value)).map_err(|_| {
                 let mut error =
                     clap::Error::new(clap::error::ErrorKind::ValueValidation).with_cmd(cmd);
                 if let Some(arg) = arg {

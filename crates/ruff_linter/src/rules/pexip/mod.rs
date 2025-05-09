@@ -37,6 +37,19 @@ mod tests {
     }
 
     #[test]
+    fn noqa_names_simple() -> Result<()> {
+        let diagnostics = test_path(
+            Path::new("pexip/noqa_names_simple.py"),
+            &LinterSettings::for_rules(vec![
+                Rule::UnusedVariable,
+                Rule::AmbiguousVariableName,
+            ]),
+        )?;
+        assert_messages!(diagnostics);
+        Ok(())
+    }
+
+    #[test]
     fn noqa_mixed() -> Result<()> {
         let diagnostics = test_path(
             Path::new("pexip/noqa_mixed.py"),

@@ -170,17 +170,12 @@ pub(crate) fn check_noqa(
                             }
                         }
 
-                        let rule_result = match identifier {
-                            NoqaIdentifier::Code(code) => Rule::from_code(code),
-                            NoqaIdentifier::Name(name) => Rule::from_name(name),
-                        };
-
                         if !seen_codes.insert(original_identifier) {
                             duplicated_codes.push(original_identifier);
                             continue;
                         }
 
-                        let Ok(rule) = rule_result else {
+                        let Ok(rule) = identifier.as_rule() else {
                             if settings
                                 .external
                                 .iter()

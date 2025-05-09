@@ -17,7 +17,7 @@ use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
 use crate::codes::NoqaCode;
 use crate::fs::relativize_path;
 use crate::message::Message;
-use crate::registry::{AsRule, Rule, RuleSet};
+use crate::registry::{AsRule, FromCodeOrNameError, Rule, RuleSet};
 use crate::rule_redirects::get_redirect_target;
 use crate::Locator;
 
@@ -77,6 +77,13 @@ impl<'a> NoqaIdentifier<'a> {
             NoqaIdentifier::Name(name) => name,
         }
     }
+
+    pub(crate) fn as_rule(&self) -> Result<Rule, FromCodeOrNameError> {
+        match self {
+            NoqaIdentifier::Code(code) => Rule::from_code(get_redirect_target(code).unwrap_or(code)),
+            NoqaIdentifier::Name(name) => Rule::from_name(name),
+        }
+    }
 }
 
 
@@ -99,6 +106,10 @@ impl<'a> RuleIdent<'a> {
 
     pub(crate) fn identifier(&self) -> NoqaIdentifier<'a> {
         self.identifier
+    }
+
+    pub(crate) fn as_rule(&self) -> Result<Rule, FromCodeOrNameError> {
+        self.identifier.as_rule()
     }
 }
 
@@ -130,9 +141,13 @@ impl Codes<'_> {
     /// Returns `true` if the string list of `codes` includes `code` (or an alias
     /// thereof).
     pub(crate) fn includes(&self, needle: Rule) -> bool {
-        let needle = needle.noqa_code();
+        let code_needle = needle.noqa_code();
+        let name_needle = needle.as_ref();
         self.iter()
-            .any(|code| needle == get_redirect_target(code.as_str()).unwrap_or(code.as_str()))
+            .any(|rule_ident: &RuleIdent| match rule_ident.identifier {
+                NoqaIdentifier::Code(code) => code_needle == get_redirect_target(code).unwrap_or(code),
+                NoqaIdentifier::Name(name) => name_needle == name,
+            })
     }
 }
 
@@ -282,13 +297,13 @@ impl<'a> FileNoqaDirectives<'a> {
                         }
                         Directive::Codes(codes) => {
                             codes.iter().filter_map(|code| {
-                                let code = code.as_str();
+                                let code_str = code.as_str();
                                 // Ignore externally-defined rules.
-                                if external.iter().any(|external| code.starts_with(external)) {
+                                if matches!(code.identifier, NoqaIdentifier::Code(_)) && external.iter().any(|external| code_str.starts_with(external)) {
                                     return None;
                                 }
 
-                                if let Ok(rule) = Rule::from_code(get_redirect_target(code).unwrap_or(code))
+                                if let Ok(rule) = code.as_rule()
                                 {
                                     Some(rule.noqa_code())
                                 } else {
@@ -378,6 +393,8 @@ struct NoqaLexer<'a> {
     /// Tracks whether we are lexing in a context with a missing delimiter
     /// e.g. at `C` in `F401C402`.
     missing_delimiter: bool,
+    /// Tracks whether we are allowed to match on names
+    allowed_name_match: bool,
     /// Rule codes collected during lexing
     codes: Vec<RuleIdent<'a>>,
 }
@@ -391,6 +408,7 @@ impl<'a> NoqaLexer<'a> {
             cursor: Cursor::new(&source[range]),
             warnings: Vec::new(),
             missing_delimiter: false,
+            allowed_name_match: true,
             codes: Vec::new(),
         }
     }
@@ -590,6 +608,7 @@ impl<'a> NoqaLexer<'a> {
                 self.missing_delimiter = match self.cursor.first() {
                     ',' => {
                         self.cursor.eat_char(',');
+                        self.allowed_name_match = true;
                         false
                     }
 
@@ -615,7 +634,7 @@ impl<'a> NoqaLexer<'a> {
                     _ => return Err(LexicalError::InvalidCodeSuffix),
                 };
             }
-            Some(c) if c.is_ascii_lowercase() => {
+            Some(c) if self.allowed_name_match && c.is_ascii_lowercase() => {
                 // This should be a rule name
                 self.cursor.eat_while(|chr| chr.is_ascii_lowercase() || chr.is_ascii_digit() || chr == '-');
 
@@ -629,6 +648,7 @@ impl<'a> NoqaLexer<'a> {
                     return Err(LexicalError::InvalidCodeSuffix)
                 }
 
+                self.eat_whitespace();
                 if self.cursor.is_eof() {
                     return Ok(());
                 }
@@ -636,12 +656,13 @@ impl<'a> NoqaLexer<'a> {
                 self.missing_delimiter = false;
                 if self.cursor.first() == ',' {
                     self.cursor.eat_char(',');
+                    self.allowed_name_match = true;
                 } else {
-                    // If there is no comma, the rest must be a comment
-                    self.cursor.skip_bytes(self.cursor.as_str().len());
+                    // If there is no comma, we cannot match the next word as a rule name
+                    self.allowed_name_match = false;
                 }
             }
-            Some('#') => {
+            Some(_) => {
                 // The first time we hit an evidently invalid code,
                 // it's probably a trailing comment. So stop lexing,
                 // but don't push an error.
@@ -649,9 +670,6 @@ impl<'a> NoqaLexer<'a> {
                 // # noqa: F401 # we import this for a reason
                 //              ^----- stop lexing but no error
                 self.cursor.skip_bytes(self.cursor.as_str().len());
-            }
-            Some(_) => {
-                return Err(LexicalError::InvalidCodeSuffix)
             }
             None => {}
         }
@@ -1129,10 +1147,7 @@ impl<'a> NoqaDirectives<'a> {
                                 .iter()
                                 .any(|external| code.as_str().starts_with(external))
                             {
-                                if Rule::from_code(
-                                    get_redirect_target(code.as_str()).unwrap_or(code.as_str()),
-                                )
-                                .is_err()
+                                if code.as_rule().is_err()
                                 {
                                     #[allow(deprecated)]
                                     let line = locator.compute_line_index(range.start());
